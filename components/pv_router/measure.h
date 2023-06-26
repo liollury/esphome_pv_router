@@ -2,19 +2,24 @@
 #include <esp32-hal-timer.h>
 #include "esphome/core/hal.h"
 
+#define sampling_count 100
+#define smoothing_factor 10 // number of samples to average
+
 namespace esphome {
 	namespace pvrouter {
 		static const char *const TAG = "pvr_measure";
+		static const int smoothing_weight = smoothing_factor - 1;
 		
 		class Measure {
 		  private:
-			int volt[100];
-			int amp[100];
+			int volt[sampling_count];
+			int amp[sampling_count];
 			float voltM;
 			float ampM;
 			unsigned long previous_compute_millis;
 			volatile unsigned long last_zero_cross_interruption = 0;
 			volatile int current_triac_position = 0;
+			int sampling_value_count = 0;
 			hw_timer_t* timer = NULL;
 			bool sync_lost = false;
 		  protected:
@@ -32,8 +37,8 @@ namespace esphome {
 			bool heating_allowed = false;
 			bool force_heating = false;
 			
-			float pW;
-			float pVA;
+			float pW = 0;
+			float pVA = 0;
 			float Wh = 0;
 			bool is_power_connected = false; 
 			int triac_delay = 100;
@@ -60,7 +65,6 @@ namespace esphome {
 			void reset_wh();
 			static void zero_cross_interrupt(void *_this);
 			void on_timer_interrupt();
-			void stop_triac();
 		};
 	}
 }

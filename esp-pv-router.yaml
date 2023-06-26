@@ -153,4 +153,3 @@ wifi:
 #  ssid: "Zenika-Rennes"
 #  password: "Zenik@3006"
   fast_connect: true
-  power_save_mode: none

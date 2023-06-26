@@ -79,21 +79,16 @@ namespace esphome {
 		}
 
 		void Measure::measure_power() {
-			int index;
+			this->sampling_value_count = 0;
 			int ref_volt = analogRead(this->analog_ref_pin_->get_pin());
 			unsigned long measure_millis = millis();
 			int volt_pin = this->analog_volt_pin_->get_pin();
 			int current_pin = this->analog_current_pin_->get_pin();
-			//Reset table measurements
-			for (int i = 0; i < 100; i++) {
-				this->volt[i] = 0;
-				this->amp[i] = 0;
-			}
 
-			while (millis() - measure_millis < 21) {                                                         //Read values in continuous during 20ms. One loop is around 150 micro seconds
-				index = (micros() % 20000) / 200;    //We have more results that we need during 20ms to fill the tables of 100 samples
-				this->volt[index] = analogRead(volt_pin) - ref_volt;
-				this->amp[index] = analogRead(current_pin) - ref_volt;
+			while (millis() - measure_millis < 21) { //Read values in continuous during 20ms. About 60 loops
+				this->volt[this->sampling_value_count] = analogRead(volt_pin) - ref_volt;
+				this->amp[this->sampling_value_count] = analogRead(current_pin) - ref_volt;
+				this->sampling_value_count++;
 			}
 		}
 
@@ -102,27 +97,24 @@ namespace esphome {
 		    float V, I;
 			float volt_acc = 0;
 			float current_acc = 0;
-			int active_values = 0;
-			this->pW = 0;
-			for (int i = 0; i < 100; i++) {
-				if (this->volt[i] != 0 || this->amp[i] != 0) {
-				    active_values++;
-                    V = this->volt_factor_ * this->volt[i];
-                    volt_acc += sq(V);
-                    I = this->current_factor_ * this->amp[i];
-                    current_acc += sq(I);
-                    this->pW += V * I;
-				}
+			float power_acc = 0;
+			for (int i = 0; i < this->sampling_value_count; i++) {
+                V = this->volt_factor_ * this->volt[i];
+                volt_acc += sq(V);
+                I = this->current_factor_ * this->amp[i];
+                current_acc += sq(I);
+                power_acc += V * I;
 			}
-			this->voltage = (19 * this->voltage + sqrt(volt_acc / active_values)) / 20;
-			this->current = (19 * this->current + sqrt(current_acc / active_values)) / 20;
+			this->voltage = (smoothing_weight * this->voltage + sqrt(volt_acc / this->sampling_value_count)) / smoothing_factor;
+			this->current = (smoothing_weight * this->current + sqrt(current_acc / this->sampling_value_count)) / smoothing_factor;
 			this->is_power_connected = (this->voltage > 190 && this->voltage < 280);
+			// ESP_LOGI(TAG, "active values %d - %f - %f - %f", this->sampling_value_count, V, I, volt_acc);
 			if (this->is_power_connected) {
-				this->pW = floor(this->pW / active_values);
+				this->pW = (smoothing_weight * this->pW + floor(power_acc / this->sampling_value_count)) / smoothing_factor;
 				this->pVA = floor(this->voltage * this->current);
 				this->Wh += this->pW / 90000;    // Watt Hour, Every 40ms
 			} else {
-				//ESP_LOGI(TAG, "Power signal lost (%fV)", this->voltage);
+				// ESP_LOGI(TAG, "Power signal lost (%fV)", this->voltage);
 				this->pW = 0;
 				this->pVA = 0;
 			}
@@ -156,7 +148,7 @@ namespace esphome {
 						ESP_LOGI(TAG, "Zero crossing sync lost");
 					}
 					this->sync_lost = true;
-					this->stop_triac();
+			        this->triac_pin_->digital_write(false);
 				} else {
 					if (this->sync_lost) {
 						ESP_LOGI(TAG, "Zero crossing sync restored");
@@ -168,10 +160,6 @@ namespace esphome {
 
 		void Measure::reset_wh() {
 			this->Wh = 0;
-		}
-
-		void Measure::stop_triac() {
-			this->triac_pin_->digital_write(false);
 		}
 	}
 }
